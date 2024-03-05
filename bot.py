@@ -34,6 +34,19 @@ FLEX_TIER_TO_ROLE = {
 }
 UNRANKED_ROLE = -16
 NO_LEAGUE_ROLE = -17
+TIER_TO_IMAGE = {
+    "CHALLENGER": "https://static.wikia.nocookie.net/leagueoflegends/images/1/14/Season_2023_-_Challenger.png",
+    "GRANDMASTER": "https://static.wikia.nocookie.net/leagueoflegends/images/6/64/Season_2023_-_Grandmaster.png",
+    "MASTER": "https://static.wikia.nocookie.net/leagueoflegends/images/e/eb/Season_2022_-_Master.png",
+    "DIAMOND": "https://static.wikia.nocookie.net/leagueoflegends/images/3/37/Season_2023_-_Diamond.png",
+    "EMERALD": "https://static.wikia.nocookie.net/leagueoflegends/images/4/4b/Season_2023_-_Emerald.png",
+    "PLATINUM": "https://static.wikia.nocookie.net/leagueoflegends/images/3/3b/Season_2022_-_Platinum.png",
+    "GOLD": "https://static.wikia.nocookie.net/leagueoflegends/images/8/8d/Season_2022_-_Gold.png",
+    "SILVER": "https://static.wikia.nocookie.net/leagueoflegends/images/c/c4/Season_2023_-_Silver.png",
+    "BRONZE": "https://static.wikia.nocookie.net/leagueoflegends/images/e/e9/Season_2022_-_Bronze.png",
+    "IRON": "https://static.wikia.nocookie.net/leagueoflegends/images/f/fe/Season_2022_-_Iron.png",
+    "UNRANKED": "https://static.wikia.nocookie.net/leagueoflegends/images/3/3e/Season_2022_-_Unranked.png"
+}
 
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
@@ -47,11 +60,11 @@ bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 
 # -------------------- Helpers --------------------
 
-async def handleApiDataAndMakeEmbed(links, member: discord.Member, title: str) -> discord.Embed:
+async def handleApiDataAndMakeEmbed(links, member: discord.Member, title: str) -> tuple[discord.Embed, bool]:
     key = str(member.id)
     respone = get(entryURL.format(id=links[str(member.id)]['id']))
     if respone.status_code != 200:
-        return discord.Embed(description="Something is wrong with the currently linked league account. Try linking again using `link` command.", colour=discord.Colour.red())
+        return (discord.Embed(description="Something is wrong with the currently linked league account. Try linking again using `link` command.", colour=discord.Colour.red()), True)
     entryData = respone.json()
     soloData, flexData = None, None
     for queueType in entryData:
@@ -86,11 +99,12 @@ async def handleApiDataAndMakeEmbed(links, member: discord.Member, title: str) -
         links[key]['flex'] = "UNRANKED"
     
     with open("links.json", "w") as file:
-        json.dump(links, file)
+        json.dump(links, file, indent=4)
     
     embed.add_field(name=f"Solo/Duo Queue", value=soloField, inline=False)
     embed.add_field(name=f"Flex Queue", value=flexField, inline=False)
-    return embed
+    embed.set_thumbnail(url=TIER_TO_IMAGE[links[key]['solo'].split(' ')[0]])
+    return (embed, False)
 
 # -------------------- Commands --------------------
 
@@ -102,7 +116,7 @@ async def link(interaction: discord.Interaction, summoner: str, tag: str):
     response = get(accountURL.format(name=parse.quote(summoner.strip()), tag=tag.strip()))
     if response.status_code != 200:
         embed = discord.Embed(description="This summoner does not exist... Please check your `name` and `tag` again.", colour=discord.Colour.red())
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
     # Get the already linked members
@@ -113,15 +127,15 @@ async def link(interaction: discord.Interaction, summoner: str, tag: str):
     response = get(summonerURL.format(puuid=response.json()['puuid']))
     if response.status_code != 200:
         embed = discord.Embed(description="This summoner does not exist... Please check your `name` and `tag` again.", colour=discord.Colour.red())
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     summonerData = response.json()
     links[key] = {}
     links[key]['id'] = summonerData['id']
-    links[key]['name'] = summoner+'#'+tag
+    links[key]['name'] = summoner+'#'+tag.upper()
     
     embed = await handleApiDataAndMakeEmbed(links, member, "Linked!")
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed[0], ephemeral=embed[1])
 
 @bot.tree.command(name="roles", description="Updates your roles in the server according to your rank.")
 async def roles(interaction: discord.Interaction):
@@ -131,11 +145,11 @@ async def roles(interaction: discord.Interaction):
     member = interaction.user
     if str(member.id) not in links:
         embed = discord.Embed(description="You are not linked to your league account yet. See the `link` command.", colour=discord.Colour.red())
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
     embed = await handleApiDataAndMakeEmbed(links, member, "Ranks")
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed[0], ephemeral=embed[1])
         
 
 # -------------------- Events --------------------
