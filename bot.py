@@ -1,5 +1,6 @@
 import os
 import json
+import discord.ext.commands
 from requests import get
 from urllib import parse
 from colorama import Fore, Style
@@ -8,6 +9,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
+
+import discord.ext
 
 # -------------------- Setup --------------------
 
@@ -137,8 +140,8 @@ async def link(interaction: discord.Interaction, summoner: str, tag: str):
     embed = await handleApiDataAndMakeEmbed(links, member, "Linked!")
     await interaction.response.send_message(embed=embed[0], ephemeral=embed[1])
 
-@bot.tree.command(name="roles", description="Updates your roles in the server according to your rank.")
-async def roles(interaction: discord.Interaction):
+@bot.tree.command(name="elo", description="Updates your roles in the server according to your rank.")
+async def elo(interaction: discord.Interaction):
     # Get the already linked members
     with open("links.json", "r") as file:
         links = json.load(file)
@@ -154,7 +157,14 @@ async def roles(interaction: discord.Interaction):
 
 # -------------------- Events --------------------
     
-# TODO: Add the on join event for the No League? role.
+@bot.event
+async def on_member_join(member: discord.Member):
+    await member.add_roles(member.guild.roles[NO_LEAGUE_ROLE])
+    dm: discord.DMChannel = await member.create_dm()
+    embed = discord.Embed(title=f"Welcome {member.name}!", description="This bot manages the roles in the server, which correspond to the league of legends ranks.\n\nPlease link your league account to the server by using the '/link' command.\n(Preferably in the #bot-using channel)", color=discord.Colour.blurple())
+    embed.set_footer(text="Thank you!")
+    await dm.send(embed=embed)
+    
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -190,6 +200,13 @@ async def on_ready():
         json.dump(links, file)
 
     print(f"{INFO}{bot.user} is ready to go!")
+
+# # -------------------- Testing --------------------
+
+# @bot.command('test')
+# async def test(ctx: discord.ext.commands.Context):
+#     member = ctx.author
+    
 
 # -------------------- Run --------------------
 
