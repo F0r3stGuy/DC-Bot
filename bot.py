@@ -1,6 +1,7 @@
 import os
 import json
 import discord.ext.commands
+from time import sleep
 from requests import get
 from urllib import parse
 from colorama import Fore, Style
@@ -16,6 +17,7 @@ import discord.ext
 
 INFO = f"{Style.BRIGHT}{Fore.LIGHTBLUE_EX}INFO{Fore.RESET}{Style.NORMAL}\t"
 WARN = f"{Style.BRIGHT}{Fore.LIGHTYELLOW_EX}WARN{Fore.RESET}{Style.NORMAL}\t"
+ERR = f"{Style.BRIGHT}{Fore.LIGHTRED_EX}ERR!{Fore.RESET}{Style.NORMAL}\t"
 
 SOLO_TIER_TO_ROLE = {
     "CHALLENGER": -2,
@@ -63,12 +65,16 @@ bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 
 # -------------------- Helpers --------------------
 
-async def handleApiDataAndMakeEmbed(links, member: discord.Member, title: str) -> tuple[discord.Embed, bool]:
+keysToRemove = []
+
+async def handleApiDataAndMakeEmbed(links, member: discord.Member, embedTitle: str) -> tuple[discord.Embed, bool]:
     key = str(member.id)
-    respone = get(entryURL.format(id=links[str(member.id)]['id']))
-    if respone.status_code != 200:
+    response = get(entryURL.format(id=links[str(member.id)]['id']))
+    if response.status_code != 200:
+        print(f"{ERR}{member.name} has a broken link. Removing from list...")
+        keysToRemove.append(key)
         return (discord.Embed(description="Something is wrong with the currently linked league account. Try linking again using `link` command.", colour=discord.Colour.red()), True)
-    entryData = respone.json()
+    entryData = response.json()
     soloData, flexData = None, None
     for queueType in entryData:
         if "SOLO" in queueType['queueType']:
@@ -77,7 +83,7 @@ async def handleApiDataAndMakeEmbed(links, member: discord.Member, title: str) -
             flexData = queueType
     
     # Give the right roles and prepare message
-    embed = discord.Embed(title=title, colour=discord.Colour.blurple())
+    embed = discord.Embed(title=embedTitle, colour=discord.Colour.blurple())
     embed.set_author(name=links[key]['name'])
 
     await member.remove_roles(*member.roles[1:])
@@ -152,8 +158,7 @@ async def elo(interaction: discord.Interaction):
         return
     
     embed = await handleApiDataAndMakeEmbed(links, member, "Ranks")
-    await interaction.response.send_message(embed=embed[0], ephemeral=embed[1])
-        
+    await interaction.response.send_message(embed=embed[0], ephemeral=embed[1])        
 
 # -------------------- Events --------------------
     
@@ -176,13 +181,6 @@ async def on_message(message: discord.Message):
 @bot.event
 async def on_ready():
     guild = bot.guilds[0]
-    
-    # Sync slash commands
-    try:
-        synced = await bot.tree.sync()
-        print(f"{INFO}Synced {len(synced)} commands")
-    except Exception as e:
-        print(e)
 
     # Get the already linked members
     with open("links.json", "r") as file:
@@ -192,21 +190,90 @@ async def on_ready():
     for member in guild.members:
         if member.bot: continue
         if str(member.id) not in links:
-            # await member.remove_roles(*member.roles[1:])
-            # await member.add_roles(guild.roles[NO_LEAGUE_ROLE])
             print(f"{WARN}{member.name}, id: {member.id} is not in the list")
 
-    with open("links.json", "w") as file:
-        json.dump(links, file)
+    # with open("links.json", "w") as file:
+    #     json.dump(links, file)
 
     print(f"{INFO}{bot.user} is ready to go!")
 
-# # -------------------- Testing --------------------
+async def on_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.errors.CheckFailure):
+        print(f"{WARN}{interaction.user.name} used the forbidden command: {Fore.MAGENTA}{interaction.command.name}{Fore.RESET}")
+    else:
+        print(error)
+bot.tree.on_error = on_error
 
-# @bot.command('test')
-# async def test(ctx: discord.ext.commands.Context):
-#     member = ctx.author
+# -------------------- Modding --------------------
+
+def check_if_it_is_me(interaction: discord.Interaction) -> bool:
+    return interaction.user.id == 374582127515271168
+
+@bot.tree.command(name="sync", description="Sync the bot commands globally.")
+@app_commands.check(check_if_it_is_me)
+async def sync(interaction: discord.Interaction):
+    # Sync slash commands
+    try:
+        synced = await bot.tree.sync()
+        print(f"{INFO}Synced {len(synced)} commands")
+        await interaction.response.send_message(embed=discord.Embed(description="Synced!", colour=discord.Colour.blurple()))
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message(embed=discord.Embed(description="Synced failed", colour=discord.Colour.red()))
+
+@bot.tree.command(name="set", description="Link someone else using their discord id.")
+@app_commands.check(check_if_it_is_me)
+async def set(interaction: discord.Interaction, dcid: str, summoner: str, tag: str):
+    # Error handling
+    response = get(accountURL.format(name=parse.quote(summoner.strip()), tag=tag.strip()))
+    if response.status_code != 200:
+        embed = discord.Embed(description="This summoner does not exist... Please check your `name` and `tag` again.", colour=discord.Colour.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
     
+    # Get the already linked members
+    with open("links.json", "r") as file:
+        links = json.load(file)
+    response = get(summonerURL.format(puuid=response.json()['puuid']))
+    if response.status_code != 200:
+        embed = discord.Embed(description="This summoner does not exist... Please check your `name` and `tag` again.", colour=discord.Colour.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    summonerData = response.json()
+    links[dcid] = {}
+    links[dcid]['id'] = summonerData['id']
+    links[dcid]['name'] = summoner+'#'+tag.upper()
+    
+    embed = await handleApiDataAndMakeEmbed(links, interaction.guild.get_member(int(dcid)), "Linked!")
+    await interaction.response.send_message(embed=embed[0], ephemeral=embed[1])
+
+@bot.tree.command(name="all", description="Update rank roles for all connected users.")
+@app_commands.check(check_if_it_is_me)
+async def all(interaction: discord.Interaction):
+    await interaction.response.defer()
+    with open("links.json", "r") as file:
+        links = json.load(file)
+    
+    for dcid in links:
+        print(f"{INFO}{dcid}: {links[dcid]["name"]} is being updated")
+        await handleApiDataAndMakeEmbed(links, interaction.guild.get_member(int(dcid)), "")
+        sleep(0.06)
+
+    global keysToRemove
+    for key in keysToRemove:
+        links.pop(key)
+    keysToRemove = []
+
+    for member in interaction.guild.members:
+        if member.bot: continue
+        if str(member.id) not in links:
+            await member.remove_roles(*member.roles[1:])
+            await member.add_roles(interaction.guild.roles[NO_LEAGUE_ROLE])
+
+    with open("links.json", "w") as file:
+        json.dump(links, file, indent=4)
+
+    await interaction.followup.send(embed=discord.Embed(description="Updated all the roles!", colour=discord.Colour.blurple()))
 
 # -------------------- Run --------------------
 
