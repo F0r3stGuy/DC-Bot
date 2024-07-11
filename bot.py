@@ -253,13 +253,18 @@ async def all(interaction: discord.Interaction):
     await interaction.response.defer()
     with open("links.json", "r") as file:
         links = json.load(file)
+
+    global keysToRemove
     
     for dcid in links:
         print(f"{INFO}{dcid}: {links[dcid]["name"]} is being updated")
-        await handleApiDataAndMakeEmbed(links, interaction.guild.get_member(int(dcid)), "")
+        member = interaction.guild.get_member(int(dcid))
+        if (member == None):
+            keysToRemove.append(dcid)
+            continue
+        await handleApiDataAndMakeEmbed(links, member, "")
         sleep(0.06)
 
-    global keysToRemove
     for key in keysToRemove:
         links.pop(key)
     keysToRemove = []
